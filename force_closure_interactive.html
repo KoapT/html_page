@@ -1,0 +1,398 @@
+
+<style>
+.fc-card{background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:1rem 1.25rem;margin-bottom:1rem}
+.fc-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:.75rem}
+.fc-label{font-size:13px;color:var(--color-text-secondary);min-width:80px}
+.fc-val{font-size:13px;font-weight:500;color:var(--color-text-primary);min-width:36px}
+.fc-badge{display:inline-block;padding:3px 12px;border-radius:6px;font-size:13px;font-weight:500}
+.fc-yes{background:var(--color-background-success);color:var(--color-text-success)}
+.fc-no{background:var(--color-background-danger);color:var(--color-text-danger)}
+.metric-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:.5rem}
+.metric-card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:.6rem .8rem}
+.metric-title{font-size:11px;color:var(--color-text-secondary);margin-bottom:4px}
+.metric-value{font-size:18px;font-weight:500;color:var(--color-text-primary)}
+</style>
+
+<h2 class="sr-only">力封闭交互演示：调整接触角度和摩擦系数，实时查看力封闭条件是否满足</h2>
+
+<div class="fc-card">
+  <div class="fc-row">
+    <span class="fc-label">摩擦系数 μ</span>
+    <input type="range" min="0.1" max="1.0" step="0.05" value="0.5" id="mu-slider" style="flex:1">
+    <span class="fc-val" id="mu-val">0.50</span>
+  </div>
+  <div class="fc-row">
+    <span class="fc-label">接触点偏角 α</span>
+    <input type="range" min="0" max="50" step="1" value="10" id="alpha-slider" style="flex:1">
+    <span class="fc-val" id="alpha-val">10°</span>
+    <span class="fc-label" style="margin-left:8px">摩擦锥半角 φ</span>
+    <span class="fc-val" id="phi-val">26.6°</span>
+  </div>
+  <div class="fc-row" style="margin-bottom:0">
+    <span class="fc-label">力封闭状态</span>
+    <span class="fc-badge" id="fc-status">判断中…</span>
+    <span style="font-size:12px;color:var(--color-text-secondary);margin-left:8px" id="fc-reason"></span>
+  </div>
+</div>
+
+<canvas id="fc-canvas" width="640" height="300" style="width:100%;border-radius:var(--border-radius-lg);border:0.5px solid var(--color-border-tertiary)"></canvas>
+
+<div class="metric-grid" style="margin-top:10px">
+  <div class="metric-card">
+    <div class="metric-title">摩擦锥半角 φ = arctan(μ)</div>
+    <div class="metric-value" id="m-phi">26.6°</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-title">对跖角余量 α &lt; φ ?</div>
+    <div class="metric-value" id="m-antipodal">满足</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-title">抓取质量 Q∞（归一化）</div>
+    <div class="metric-value" id="m-quality">0.87</div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('fc-canvas');
+const ctx = canvas.getContext('2d');
+const muSlider = document.getElementById('mu-slider');
+const alphaSlider = document.getElementById('alpha-slider');
+
+function isDark() {
+  return matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+function getColors() {
+  const dark = isDark();
+  return {
+    bg: dark ? '#1a1a18' : '#ffffff',
+    obj: dark ? '#1e2a3a' : '#e6f1fb',
+    objStroke: dark ? '#378ADD' : '#185FA5',
+    text: dark ? '#c2c0b6' : '#3d3d3a',
+    textStrong: dark ? '#f0ede4' : '#1a1a18',
+    grid: dark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)',
+    c1: '#D85A30',
+    c2: '#185FA5',
+    cone1: 'rgba(216,90,48,0.18)',
+    cone2: 'rgba(24,95,165,0.18)',
+    hull: dark ? 'rgba(127,119,221,0.25)' : 'rgba(83,74,183,0.18)',
+    hullStroke: '#534AB7',
+    origin: '#3B6D11',
+    axis: dark ? '#5F5E5A' : '#B4B2A9',
+    wrench1: 'rgba(216,90,48,0.3)',
+    wrench2: 'rgba(24,95,165,0.3)',
+  };
+}
+
+function draw() {
+  const W = canvas.width, H = canvas.height;
+  const mu = parseFloat(muSlider.value);
+  const alpha = parseFloat(alphaSlider.value) * Math.PI / 180;
+  const phi = Math.atan(mu);
+  const phiDeg = (phi * 180 / Math.PI).toFixed(1);
+  const alphaDeg = parseFloat(alphaSlider.value);
+
+  document.getElementById('mu-val').textContent = mu.toFixed(2);
+  document.getElementById('alpha-val').textContent = alphaDeg + '°';
+  document.getElementById('phi-val').textContent = phiDeg + '°';
+  document.getElementById('m-phi').textContent = phiDeg + '°';
+
+  const fc = alpha < phi;
+  document.getElementById('fc-status').textContent = fc ? '力封闭成立' : '力封闭不成立';
+  document.getElementById('fc-status').className = 'fc-badge ' + (fc ? 'fc-yes' : 'fc-no');
+  document.getElementById('fc-reason').textContent = fc
+    ? `α=${alphaDeg}° < φ=${phiDeg}°，接触力在摩擦锥内`
+    : `α=${alphaDeg}° ≥ φ=${phiDeg}°，接触力超出摩擦锥`;
+  document.getElementById('m-antipodal').textContent = fc ? '满足' : '不满足';
+  const q = fc ? Math.max(0, Math.min(1, (Math.sin(phi - alpha)).toFixed(3))) : 0;
+  document.getElementById('m-quality').textContent = fc ? q.toFixed(3) : '0';
+
+  const C = getColors();
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = C.bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // ── LEFT PANEL: Object + friction cones ──
+  const lCx = 175, lCy = 150;
+
+  // Object ellipse
+  ctx.save();
+  ctx.beginPath();
+  ctx.ellipse(lCx, lCy, 90, 65, 0, 0, Math.PI * 2);
+  ctx.fillStyle = C.obj;
+  ctx.fill();
+  ctx.strokeStyle = C.objStroke;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.restore();
+
+  ctx.fillStyle = C.textStrong;
+  ctx.font = '500 13px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('物体', lCx, lCy + 5);
+
+  // Contact point c1 (left)
+  const c1x = lCx - 90, c1y = lCy;
+  const n1 = Math.PI; // outward normal pointing left
+  const coneLen = 80;
+
+  // Friction cone c1
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(c1x, c1y);
+  ctx.lineTo(c1x + Math.cos(n1 - phi) * coneLen, c1y + Math.sin(n1 - phi) * coneLen);
+  ctx.lineTo(c1x + Math.cos(n1 + phi) * coneLen, c1y + Math.sin(n1 + phi) * coneLen);
+  ctx.closePath();
+  ctx.fillStyle = C.cone1;
+  ctx.fill();
+  ctx.restore();
+
+  // Cone edges c1
+  ctx.save();
+  ctx.strokeStyle = C.c1;
+  ctx.lineWidth = 0.8;
+  ctx.setLineDash([3, 2]);
+  ctx.beginPath();
+  ctx.moveTo(c1x, c1y);
+  ctx.lineTo(c1x + Math.cos(n1 - phi) * coneLen, c1y + Math.sin(n1 - phi) * coneLen);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(c1x, c1y);
+  ctx.lineTo(c1x + Math.cos(n1 + phi) * coneLen, c1y + Math.sin(n1 + phi) * coneLen);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  // Actual force direction c1 (with alpha offset)
+  const f1Angle = n1 + alpha;
+  ctx.save();
+  ctx.strokeStyle = C.c1;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(c1x, c1y);
+  ctx.lineTo(c1x + Math.cos(f1Angle) * 60, c1y + Math.sin(f1Angle) * 60);
+  ctx.stroke();
+  // arrowhead
+  const a1x = c1x + Math.cos(f1Angle) * 60, a1y = c1y + Math.sin(f1Angle) * 60;
+  ctx.beginPath();
+  ctx.moveTo(a1x, a1y);
+  ctx.lineTo(a1x - Math.cos(f1Angle - 0.4) * 10, a1y - Math.sin(f1Angle - 0.4) * 10);
+  ctx.lineTo(a1x - Math.cos(f1Angle + 0.4) * 10, a1y - Math.sin(f1Angle + 0.4) * 10);
+  ctx.closePath();
+  ctx.fillStyle = C.c1;
+  ctx.fill();
+  ctx.restore();
+
+  ctx.beginPath();
+  ctx.arc(c1x, c1y, 5, 0, Math.PI * 2);
+  ctx.fillStyle = C.c1;
+  ctx.fill();
+
+  // Contact point c2 (right)
+  const c2x = lCx + 90, c2y = lCy;
+  const n2 = 0;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(c2x, c2y);
+  ctx.lineTo(c2x + Math.cos(n2 - phi) * coneLen, c2y + Math.sin(n2 - phi) * coneLen);
+  ctx.lineTo(c2x + Math.cos(n2 + phi) * coneLen, c2y + Math.sin(n2 + phi) * coneLen);
+  ctx.closePath();
+  ctx.fillStyle = C.cone2;
+  ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  ctx.strokeStyle = C.c2;
+  ctx.lineWidth = 0.8;
+  ctx.setLineDash([3, 2]);
+  ctx.beginPath();
+  ctx.moveTo(c2x, c2y);
+  ctx.lineTo(c2x + Math.cos(n2 - phi) * coneLen, c2y + Math.sin(n2 - phi) * coneLen);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(c2x, c2y);
+  ctx.lineTo(c2x + Math.cos(n2 + phi) * coneLen, c2y + Math.sin(n2 + phi) * coneLen);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  const f2Angle = n2 - alpha;
+  ctx.save();
+  ctx.strokeStyle = C.c2;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(c2x, c2y);
+  ctx.lineTo(c2x + Math.cos(f2Angle) * 60, c2y + Math.sin(f2Angle) * 60);
+  ctx.stroke();
+  const a2x = c2x + Math.cos(f2Angle) * 60, a2y = c2y + Math.sin(f2Angle) * 60;
+  ctx.beginPath();
+  ctx.moveTo(a2x, a2y);
+  ctx.lineTo(a2x - Math.cos(f2Angle - 0.4) * 10, a2y - Math.sin(f2Angle - 0.4) * 10);
+  ctx.lineTo(a2x - Math.cos(f2Angle + 0.4) * 10, a2y - Math.sin(f2Angle + 0.4) * 10);
+  ctx.closePath();
+  ctx.fillStyle = C.c2;
+  ctx.fill();
+  ctx.restore();
+
+  ctx.beginPath();
+  ctx.arc(c2x, c2y, 5, 0, Math.PI * 2);
+  ctx.fillStyle = C.c2;
+  ctx.fill();
+
+  // Labels
+  ctx.font = '12px sans-serif';
+  ctx.fillStyle = C.c1;
+  ctx.textAlign = 'left';
+  ctx.fillText('c₁  f₁', c1x - 60, c1y - 10);
+  ctx.fillStyle = C.c2;
+  ctx.textAlign = 'left';
+  ctx.fillText('c₂  f₂', c2x + 8, c2y - 10);
+
+  ctx.fillStyle = C.text;
+  ctx.textAlign = 'center';
+  ctx.font = '11px sans-serif';
+  ctx.fillText('α = 接触力偏角', lCx, lCy + 110);
+  ctx.fillText('φ = arctan(μ) 摩擦锥半角', lCx, lCy + 126);
+
+  // Panel title
+  ctx.fillStyle = C.textStrong;
+  ctx.font = '500 13px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('接触模型与摩擦锥', lCx, 22);
+
+  // ── DIVIDER ──
+  ctx.save();
+  ctx.strokeStyle = C.axis;
+  ctx.lineWidth = 0.5;
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath();
+  ctx.moveTo(W / 2, 20);
+  ctx.lineTo(W / 2, H - 20);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  // ── RIGHT PANEL: Wrench space ──
+  const rCx = 490, rCy = 155, rScale = 90;
+
+  ctx.fillStyle = C.textStrong;
+  ctx.font = '500 13px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('扳手空间（2D 截面）', rCx, 22);
+
+  // Grid
+  ctx.save();
+  ctx.strokeStyle = C.grid;
+  ctx.lineWidth = 0.5;
+  for (let x = rCx - 120; x <= rCx + 120; x += 30) {
+    ctx.beginPath(); ctx.moveTo(x, rCy - 120); ctx.lineTo(x, rCy + 120); ctx.stroke();
+  }
+  for (let y = rCy - 120; y <= rCy + 120; y += 30) {
+    ctx.beginPath(); ctx.moveTo(rCx - 120, y); ctx.lineTo(rCx + 120, y); ctx.stroke();
+  }
+  ctx.restore();
+
+  // Axes
+  ctx.save();
+  ctx.strokeStyle = C.axis;
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(rCx - 115, rCy); ctx.lineTo(rCx + 115, rCy); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(rCx, rCy + 115); ctx.lineTo(rCx, rCy - 115); ctx.stroke();
+  ctx.fillStyle = C.text; ctx.font = '11px sans-serif';
+  ctx.fillText('fx', rCx + 118, rCy + 4);
+  ctx.fillText('fy', rCx + 4, rCy - 118);
+  ctx.restore();
+
+  // Wrench cone from c1: force pointing left (π) with cone half-angle phi
+  // In wrench space (2D): directions from π-phi to π+phi
+  const coneSegs = 32;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(rCx, rCy);
+  for (let i = 0; i <= coneSegs; i++) {
+    const ang = (n1 - phi) + (2 * phi * i / coneSegs);
+    ctx.lineTo(rCx + Math.cos(ang) * rScale, rCy + Math.sin(ang) * rScale);
+  }
+  ctx.closePath();
+  ctx.fillStyle = C.wrench1;
+  ctx.fill();
+  ctx.strokeStyle = C.c1;
+  ctx.lineWidth = 0.8;
+  ctx.setLineDash([3, 2]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  // Wrench cone from c2: force pointing right (0) with cone half-angle phi
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(rCx, rCy);
+  for (let i = 0; i <= coneSegs; i++) {
+    const ang = (n2 - phi) + (2 * phi * i / coneSegs);
+    ctx.lineTo(rCx + Math.cos(ang) * rScale, rCy + Math.sin(ang) * rScale);
+  }
+  ctx.closePath();
+  ctx.fillStyle = C.wrench2;
+  ctx.fill();
+  ctx.strokeStyle = C.c2;
+  ctx.lineWidth = 0.8;
+  ctx.setLineDash([3, 2]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  // Actual force vectors in wrench space
+  ctx.save();
+  ctx.strokeStyle = C.c1; ctx.lineWidth = 2;
+  const wf1x = rCx + Math.cos(f1Angle) * rScale * 0.85;
+  const wf1y = rCy + Math.sin(f1Angle) * rScale * 0.85;
+  ctx.beginPath(); ctx.moveTo(rCx, rCy); ctx.lineTo(wf1x, wf1y); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(wf1x, wf1y);
+  ctx.lineTo(wf1x - Math.cos(f1Angle - 0.4) * 8, wf1y - Math.sin(f1Angle - 0.4) * 8);
+  ctx.lineTo(wf1x - Math.cos(f1Angle + 0.4) * 8, wf1y - Math.sin(f1Angle + 0.4) * 8);
+  ctx.closePath(); ctx.fillStyle = C.c1; ctx.fill();
+  ctx.restore();
+
+  ctx.save();
+  ctx.strokeStyle = C.c2; ctx.lineWidth = 2;
+  const wf2x = rCx + Math.cos(f2Angle) * rScale * 0.85;
+  const wf2y = rCy + Math.sin(f2Angle) * rScale * 0.85;
+  ctx.beginPath(); ctx.moveTo(rCx, rCy); ctx.lineTo(wf2x, wf2y); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(wf2x, wf2y);
+  ctx.lineTo(wf2x - Math.cos(f2Angle - 0.4) * 8, wf2y - Math.sin(f2Angle - 0.4) * 8);
+  ctx.lineTo(wf2x - Math.cos(f2Angle + 0.4) * 8, wf2y - Math.sin(f2Angle + 0.4) * 8);
+  ctx.closePath(); ctx.fillStyle = C.c2; ctx.fill();
+  ctx.restore();
+
+  // Origin marker
+  ctx.beginPath();
+  ctx.arc(rCx, rCy, 5, 0, Math.PI * 2);
+  ctx.fillStyle = fc ? C.origin : '#E24B4A';
+  ctx.fill();
+
+  // Origin label
+  ctx.fillStyle = C.text;
+  ctx.font = '11px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(fc ? '原点 ∈ 凸包' : '原点 ∉ 凸包', rCx + 8, rCy - 8);
+
+  // Legend
+  ctx.font = '11px sans-serif';
+  ctx.fillStyle = C.c1;
+  ctx.textAlign = 'left';
+  ctx.fillText('W(c₁)', rCx - 110, rCy - 85);
+  ctx.fillStyle = C.c2;
+  ctx.fillText('W(c₂)', rCx + 55, rCy - 85);
+
+  ctx.fillStyle = C.text;
+  ctx.textAlign = 'center';
+  ctx.fillText(fc ? '两锥凸包包含原点 → 力封闭' : '原点在凸包外 → 无力封闭', rCx, H - 16);
+}
+
+muSlider.addEventListener('input', draw);
+alphaSlider.addEventListener('input', draw);
+draw();
+</script>
